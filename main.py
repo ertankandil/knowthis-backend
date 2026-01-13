@@ -4,6 +4,7 @@ import librosa
 import numpy as np
 import tempfile
 import os
+from pydub import AudioSegment
 
 app = FastAPI(title="KnowThis AI Detection API")
 
@@ -35,21 +36,35 @@ async def analyze_audio(file: UploadFile):
         tmp_path = tmp_file.name
     
     try:
-        # Ses dosyasını yükle - librosa otomatik olarak decode eder
-        # Eğer ffmpeg yoksa audioread kullanır
+        # Önce pydub ile WAV'a çevir (tüm formatları destekler)
         try:
-            audio, sr = librosa.load(tmp_path, sr=22050, duration=10)
+            print(f"📥 Dosya alındı: {file.filename}, boyut: {len(content)} bytes")
+            
+            # pydub ile oku (m4a, mp3, wav hepsini destekler)
+            audio_segment = AudioSegment.from_file(tmp_path)
+            
+            # Mono yap
+            if audio_segment.channels > 1:
+                audio_segment = audio_segment.set_channels(1)
+            
+            # Sample rate'i 22050'ye ayarla
+            audio_segment = audio_segment.set_frame_rate(22050)
+            
+            # WAV olarak geçici dosyaya kaydet
+            wav_path = tmp_path.replace(tmp_path.split('.')[-1], 'wav')
+            audio_segment.export(wav_path, format='wav')
+            
+            # Librosa ile yükle
+            audio, sr = librosa.load(wav_path, sr=22050, duration=10)
+            
+            # Geçici WAV dosyasını sil
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+                
         except Exception as e:
-            print(f"Librosa load error: {e}")
-            # Alternatif: soundfile ile deneme
-            import soundfile as sf
-            audio, sr = sf.read(tmp_path)
-            if sr != 22050:
-                import librosa
-                audio = librosa.resample(audio, orig_sr=sr, target_sr=22050)
-                sr = 22050
-            if len(audio) > 22050 * 10:  # 10 saniye limit
-                audio = audio[:22050 * 10]
+            print(f"❌ Audio loading error: {e}")
+            # Fallback: direkt librosa ile dene
+            audio, sr = librosa.load(tmp_path, sr=22050, duration=10)
         
         # Ses özelliklerini çıkar
         features = extract_audio_features(audio, sr)
