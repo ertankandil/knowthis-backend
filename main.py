@@ -4,7 +4,7 @@ import librosa
 import numpy as np
 import tempfile
 import os
-from pydub import AudioSegment
+import soundfile as sf
 
 app = FastAPI(title="KnowThis AI Detection API")
 
@@ -36,35 +36,34 @@ async def analyze_audio(file: UploadFile):
         tmp_path = tmp_file.name
     
     try:
-        # Önce pydub ile WAV'a çevir (tüm formatları destekler)
+        # soundfile ile direkt oku (WAV formatını destekler)
+        print(f"📥 Dosya alındı: {file.filename}, boyut: {len(content)} bytes")
+        
         try:
-            print(f"📥 Dosya alındı: {file.filename}, boyut: {len(content)} bytes")
-            
-            # pydub ile oku (m4a, mp3, wav hepsini destekler)
-            audio_segment = AudioSegment.from_file(tmp_path)
+            # soundfile ile oku
+            audio, sr = sf.read(tmp_path)
+            print(f"✅ Audio yüklendi: {len(audio)} samples, {sr} Hz")
             
             # Mono yap
-            if audio_segment.channels > 1:
-                audio_segment = audio_segment.set_channels(1)
+            if len(audio.shape) > 1:
+                audio = np.mean(audio, axis=1)
             
-            # Sample rate'i 22050'ye ayarla
-            audio_segment = audio_segment.set_frame_rate(22050)
+            # Sample rate'i 22050'ye çevir
+            if sr != 22050:
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=22050)
+                sr = 22050
+                print(f"🔄 Resampled to 22050 Hz")
             
-            # WAV olarak geçici dosyaya kaydet
-            wav_path = tmp_path.replace(tmp_path.split('.')[-1], 'wav')
-            audio_segment.export(wav_path, format='wav')
-            
-            # Librosa ile yükle
-            audio, sr = librosa.load(wav_path, sr=22050, duration=10)
-            
-            # Geçici WAV dosyasını sil
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
+            # 10 saniye limit
+            if len(audio) > 22050 * 10:
+                audio = audio[:22050 * 10]
+                print(f"✂️ Trimmed to 10 seconds")
                 
         except Exception as e:
-            print(f"❌ Audio loading error: {e}")
-            # Fallback: direkt librosa ile dene
+            print(f"❌ Soundfile error: {e}, trying librosa...")
+            # Fallback: librosa
             audio, sr = librosa.load(tmp_path, sr=22050, duration=10)
+            print(f"✅ Librosa loaded: {len(audio)} samples")
         
         # Ses özelliklerini çıkar
         features = extract_audio_features(audio, sr)
