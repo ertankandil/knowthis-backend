@@ -35,8 +35,21 @@ async def analyze_audio(file: UploadFile):
         tmp_path = tmp_file.name
     
     try:
-        # Ses dosyasını yükle
-        audio, sr = librosa.load(tmp_path, sr=22050, duration=10)
+        # Ses dosyasını yükle - librosa otomatik olarak decode eder
+        # Eğer ffmpeg yoksa audioread kullanır
+        try:
+            audio, sr = librosa.load(tmp_path, sr=22050, duration=10)
+        except Exception as e:
+            print(f"Librosa load error: {e}")
+            # Alternatif: soundfile ile deneme
+            import soundfile as sf
+            audio, sr = sf.read(tmp_path)
+            if sr != 22050:
+                import librosa
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=22050)
+                sr = 22050
+            if len(audio) > 22050 * 10:  # 10 saniye limit
+                audio = audio[:22050 * 10]
         
         # Ses özelliklerini çıkar
         features = extract_audio_features(audio, sr)
@@ -51,6 +64,9 @@ async def analyze_audio(file: UploadFile):
         }
     
     except Exception as e:
+        print(f"❌ Analiz hatası: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Analiz hatası: {str(e)}")
     
     finally:
